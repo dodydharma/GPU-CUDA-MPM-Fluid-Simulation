@@ -146,6 +146,8 @@
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
+      <Include>
+      </Include>
     </CudaCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">

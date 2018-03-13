@@ -4,9 +4,12 @@
 #include "cinder/Rand.h"
 #include "cinder/gl/gl.h"
 #include "cinder/Utilities.h"
+#include <cuda_runtime.h>
+#include <cuda_gl_interop.h>
 
 //#include "Simulator.h"
 #include "SimulatorCUDA.cuh"
+#include "Common.cuh"
 #include <vector>
 
 using namespace ci;
@@ -38,7 +41,7 @@ void MPMFlui5App::setup()
 {	
 	s.initializeGrid(400, 200);
 	
-	s.addParticles(30720);
+	s.addParticles(10240*20);
 	
 	
 	s.scale = 3.0f;
@@ -47,6 +50,9 @@ void MPMFlui5App::setup()
 
 
 	mParticleVbo = gl::Vbo::create(GL_ARRAY_BUFFER, s.particles, GL_STREAM_DRAW);
+	cudaGraphicsGLRegisterBuffer(&(s.cuda_vbo_resource), mParticleVbo.get()->getId(), cudaGraphicsMapFlagsNone);
+	gpuErrchk(cudaPeekAtLastError());
+
 	// Describe particle semantics for GPU.
 	geom::BufferLayout particleLayout;
 	particleLayout.append(geom::Attrib::POSITION, 3, sizeof(Particle), offsetof(Particle, pos));
@@ -127,14 +133,7 @@ void MPMFlui5App::mouseDown( MouseEvent event )
 
 void MPMFlui5App::update()
 {
-	
 	s.updateCUDA();
-	
-	// Copy particle data onto the GPU.
-	// Map the GPU memory and write over it.
-	void *gpuMem = mParticleVbo->mapReplace();
-	memcpy(gpuMem, s.particles.data(), s.particles.size() * sizeof(Particle));
-	mParticleVbo->unmap(); 
 }
 
 void MPMFlui5App::draw()

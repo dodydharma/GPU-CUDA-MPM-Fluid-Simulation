@@ -9,6 +9,7 @@
 
 class SimulatorCUDA{
 	int gSizeX, gSizeY, gSizeY_3;
+	
 
 	Node* grid;
 	Node* d_grid;
@@ -23,9 +24,8 @@ class SimulatorCUDA{
 	float uscip(float p00, float x00, float y00, float p01, float x01, float y01, float p10, float x10, float y10, float p11, float x11, float y11, float u, float v);
 public:
 	std::vector<Particle> particles;
-
 	Particle* d_particles;
-
+	struct cudaGraphicsResource *cuda_vbo_resource;
 
 	float scale;
 
@@ -34,5 +34,4 @@ public:
 	void addParticles(int n);
 	void update();
 	void updateCUDA();
-	int* cuda_main(void);
 };

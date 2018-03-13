@@ -467,7 +467,7 @@ __global__ void loop4(Node* grid, int gSizeXY)
 	}
 }
 
-__global__ void loop5(Particle* particles, Node* grid, int nParticles, int gSizeY_3)
+__global__ void loop5(Particle* particles, Node* grid, int nParticles, int gSizeY_3, Particle* r_particles)
 {
 	int pi = blockDim.x * blockIdx.x + threadIdx.x;
 	if (pi<nParticles) {
@@ -508,6 +508,7 @@ __global__ void loop5(Particle* particles, Node* grid, int nParticles, int gSize
 				atomicAdd(&(n->v2), phi*mv);
 			}
 		}
+		r_particles[pi] = p;
 	}
 }
 
@@ -537,7 +538,11 @@ void SimulatorCUDA::updateCUDA(){
 	dim3 dimBlockN(gSizeX, 1, 1);
 	dim3 dimGridN(gSizeY, 1, 1);
 	int gSizeXY = gSizeX*gSizeY;
-	app::console() << "PARTICLE : " << particles.size() << endl;
+
+	Particle* mappedParticles;
+	size_t num_bytes;
+
+
 	loop1 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particles.size(), gSizeX, gSizeY, gSizeY_3);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
@@ -554,17 +559,22 @@ void SimulatorCUDA::updateCUDA(){
 	loop4 << <dimGridN, dimBlockN >> >(d_grid, gSizeXY);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
-	loop5 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particles.size(), gSizeY_3);
+
+	cudaGraphicsMapResources(1, &cuda_vbo_resource, 0);
 	gpuErrchk(cudaPeekAtLastError());
-	gpuErrchk(cudaDeviceSynchronize());
+	cudaGraphicsResourceGetMappedPointer((void **)&mappedParticles, &num_bytes, cuda_vbo_resource);
+	gpuErrchk(cudaPeekAtLastError());
+
+	loop5 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particles.size(), gSizeY_3, mappedParticles);
+	gpuErrchk(cudaPeekAtLastError());
+	gpuErrchk(cudaDeviceSynchronize())
+
+	cudaGraphicsUnmapResources(1, &cuda_vbo_resource, 0);
+	gpuErrchk(cudaPeekAtLastError());
+
 	loop6 << <dimGridN, dimBlockN >> >(d_grid, gSizeXY);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
-
-	//app::console() << "- loop -" << endl;
-	const int size = particles.size() * sizeof(Particle);
-	cudaMemcpy(particles.data(), d_particles, size, cudaMemcpyDeviceToHost);
-	//app::console() << "PARTICLE : " << particles.size() << endl;
 }
 
 void SimulatorCUDA::update() {
@@ -919,47 +929,6 @@ void SimulatorCUDA::update() {
 		n.v = 0;
 		memset(n.cgx, 0, 2 * numMaterials * sizeof(float));
 	}
-}
-
-const int N = 16;
-const int blocksize = 16;
-
-__global__
-void tes(int *a, int *b)
-{
-	atomicAdd(&(a[threadIdx.x]), b[threadIdx.x]);
-	//a[threadIdx.x] += b[threadIdx.x];
-}
-
-int* SimulatorCUDA::cuda_main(void)
-{
-	int* a = new int[16];
-	int* b = new int[16];
-
-	for (int i = 0; i < 16; i++) {
-		a[i] = i + 1;
-		b[i] = i + 1;
-	}
-
-	int *ad;
-	int *bd;
-
-	const int isize = N * sizeof(int);
-
-	cudaMalloc((void**)&ad, isize);
-	cudaMalloc((void**)&bd, isize);
-	cudaMemcpy(ad, a, isize, cudaMemcpyHostToDevice);
-	cudaMemcpy(bd, b, isize, cudaMemcpyHostToDevice);
-
-	dim3 dimBlock(blocksize, 1);
-	dim3 dimGrid(1, 1);
-	tes << <dimGrid, dimBlock >> >(ad, bd);
-	cudaMemcpy(a, ad, isize, cudaMemcpyDeviceToHost);
-	cudaFree(ad);
-	cudaFree(bd);
-
-	return a;
-	//return EXIT_SUCCESS;
 }
 
 
