@@ -76,15 +76,26 @@ SimulatorCUDA::SimulatorCUDA() :scale(1.0f) {
 	const int size = numMaterials * sizeof(Material);
 	cudaMalloc((void**)&d_materials, size);
 	cudaMemcpy(d_materials, materials, size, cudaMemcpyHostToDevice);
+	app::console() << "Materials intialized" << endl;
 }
 void SimulatorCUDA::initializeGrid(int sizeX, int sizeY) {
 	gSizeX = sizeX;
 	gSizeY = sizeY;
 	gSizeY_3 = sizeY - 3;
-	grid = new Node[gSizeX*gSizeY];
-	int size = gSizeX*gSizeY * sizeof(Node);
-	gpuErrchk(cudaMalloc((void**)&d_grid, size));
-	gpuErrchk(cudaMemcpy(d_grid, grid, size, cudaMemcpyHostToDevice));
+	int gSize = gSizeX*gSizeY;
+	int sizeOfGrid		= gSize * sizeof(Node);
+	int sizeOfGridAtt	= gSize * sizeof(float) * numMaterials * 2;
+
+	grid = new Node[gSize];
+	gpuErrchk(cudaMalloc((void**)&d_grid, sizeOfGrid));
+	gpuErrchk(cudaMalloc((void**)&d_gridAtt, sizeOfGridAtt));
+
+	for(int i = 0; i < gSize; i++)
+	{
+		grid[i].initAttArrays(d_gridAtt + i * numMaterials * 2);
+	}
+
+	gpuErrchk(cudaMemcpy(d_grid, grid, sizeOfGrid, cudaMemcpyHostToDevice));
 	//size = gSizeX*gSizeY * sizeof(Node*);
 	//gpuErrchk(cudaMalloc((void**)&d_active, size));
 	//gpuErrchk(cudaMalloc((void**)&d_nActive, sizeof(int)));
@@ -99,6 +110,14 @@ void SimulatorCUDA::addParticles(int n) {
 	float my = bh / (float)pn;
 	float offset = 10.0f;
 	
+	this->particleCount = n;
+	const int sizeOfParticles		= particleCount * sizeof(Particle);
+	const int sizeOfParticlesAtt	= particleCount * sizeof(float) * 12;
+
+	gpuErrchk(cudaMalloc((void**)&d_particles, sizeOfParticles));
+	gpuErrchk(cudaMalloc((void**)&d_particleAtt, sizeOfParticlesAtt));
+	gpuErrchk(cudaMemset(d_particleAtt, 0.0f, sizeOfParticlesAtt));
+	
 	int i, j;
 	// Material 1
 	for (i = 0; i < pn; i++) {
@@ -106,6 +125,7 @@ void SimulatorCUDA::addParticles(int n) {
 			float px = i*mx + offset;
 			float py = j*my + offset;
 			Particle p(&d_materials[0], px, py, ColorA(1, 0.5, 0.5, 1));
+			p.initAttArrays(d_particleAtt + particles.size()*12);
 			p.initializeWeights(gSizeY);
 			particles.push_back(p);
 		}
@@ -117,6 +137,7 @@ void SimulatorCUDA::addParticles(int n) {
 			float px = i*mx + (this->gSizeX-bw)/2;
 			float py = j*my + offset;
 			Particle p(&d_materials[1], px, py, ColorA(0.5, 1, 0.5, 1));
+			p.initAttArrays(d_particleAtt + particles.size() * 12);
 			p.initializeWeights(gSizeY);
 			particles.push_back(p);
 		}
@@ -128,6 +149,7 @@ void SimulatorCUDA::addParticles(int n) {
 			float px = i*mx + this->gSizeX - bw - offset;
 			float py = j*my + offset;
 			Particle p(&d_materials[2], px, py, ColorA(0.5, 0.5, 1, 1));
+			p.initAttArrays(d_particleAtt + particles.size() * 12);
 			p.initializeWeights(gSizeY);
 			particles.push_back(p);
 		}
@@ -137,13 +159,12 @@ void SimulatorCUDA::addParticles(int n) {
 		float px = i*mx + this->gSizeX - bw - offset;
 		float py = (j++)*my + offset;
 		Particle p(&d_materials[2], px, py, ColorA(0.5, 0.5, 1, 1));
+		p.initAttArrays(d_particleAtt + particles.size() * 12);
 		p.initializeWeights(gSizeY);
 		particles.push_back(p);
 	}
 
-	const int size = particles.size() * sizeof(Particle);
-	gpuErrchk(cudaMalloc((void**)&d_particles, size));
-	gpuErrchk(cudaMemcpy(d_particles, particles.data(), size, cudaMemcpyHostToDevice));
+	gpuErrchk(cudaMemcpy(d_particles, particles.data(), sizeOfParticles, cudaMemcpyHostToDevice));
 }
 
 __global__ void loop1(Particle* particles, Node* grid, int nParticles, int gSizeX, int gSizeY, int gSizeY_3)
@@ -467,10 +488,10 @@ __global__ void loop4(Node* grid, int gSizeXY)
 	}
 }
 
-__global__ void loop5(Particle* particles, Node* grid, int nParticles, int gSizeY_3, Particle* r_particles)
+__global__ void loop5(Particle* particles, Node* grid, int particleCount, int gSizeY_3, Particle* r_particles)
 {
 	int pi = blockDim.x * blockIdx.x + threadIdx.x;
-	if (pi<nParticles) {
+	if (pi<particleCount) {
 		Particle& p = particles[pi];
 		Material& mat = *p.mat;
 		// Update particle velocities
@@ -534,7 +555,7 @@ __global__ void loop6(Node* grid, int gSizeXY)
 
 void SimulatorCUDA::updateCUDA(){
 	dim3 dimBlockP(1024, 1, 1);
-	dim3 dimGridP((particles.size()+1023)/1024, 1, 1);
+	dim3 dimGridP((particleCount+1023)/1024, 1, 1);
 	dim3 dimBlockN(gSizeX, 1, 1);
 	dim3 dimGridN(gSizeY, 1, 1);
 	int gSizeXY = gSizeX*gSizeY;
@@ -543,19 +564,19 @@ void SimulatorCUDA::updateCUDA(){
 	size_t num_bytes;
 
 
-	loop1 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particles.size(), gSizeX, gSizeY, gSizeY_3);
+	loop1 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
 	//cudaMemset(d_nActive, -1, sizeof(int));
 	loop2 << <dimGridN, dimBlockN >> >(d_grid, gSizeXY);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
-	loop3 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particles.size(), gSizeX, gSizeY, gSizeY_3, scale);
+	loop3 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3, scale);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
 	int tes;
 	//cudaMemcpy(&tes, d_nActive, sizeof(int), cudaMemcpyDeviceToHost);
-	app::console() << "ACTIVE NODES : " << tes << endl;
+	//app::console() << "ACTIVE NODES : " << tes << endl;
 	loop4 << <dimGridN, dimBlockN >> >(d_grid, gSizeXY);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
@@ -565,7 +586,7 @@ void SimulatorCUDA::updateCUDA(){
 	cudaGraphicsResourceGetMappedPointer((void **)&mappedParticles, &num_bytes, cuda_vbo_resource);
 	gpuErrchk(cudaPeekAtLastError());
 
-	loop5 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particles.size(), gSizeY_3, mappedParticles);
+	loop5 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeY_3, mappedParticles);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize())
 
@@ -575,11 +596,12 @@ void SimulatorCUDA::updateCUDA(){
 	loop6 << <dimGridN, dimBlockN >> >(d_grid, gSizeXY);
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
+	//app::console() << particles[0].pos.x << ","<< particles[0].pos.y << endl;
 }
 
 void SimulatorCUDA::update() {
 	
-	int nParticles = particles.size();
+	int nParticles = particleCount;
 
 #pragma omp parallel for
 	for (int pi = 0; pi < nParticles; pi++) {

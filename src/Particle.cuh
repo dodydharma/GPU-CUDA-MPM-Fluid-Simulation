@@ -27,7 +27,7 @@ struct Particle {
 
 	~Particle();
 
-	void initializeArrays();
+	void initAttArrays(float* px);
 
 	void initializeWeights(int gSizeY);
 };

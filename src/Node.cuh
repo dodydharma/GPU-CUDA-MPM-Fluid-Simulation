@@ -10,6 +10,7 @@ struct Node {
 	bool active;
 	Node();
 	~Node();
+	void initAttArrays(float* cgx);
 };
 
 #endif

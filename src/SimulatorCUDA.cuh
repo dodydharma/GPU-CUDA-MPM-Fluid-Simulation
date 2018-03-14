@@ -18,6 +18,9 @@ class SimulatorCUDA{
 	//Node** d_active;
 	//int* d_nActive;
 
+	float* d_gridAtt;
+	float* d_particleAtt;
+
 	Material materials[numMaterials];
 	Material* d_materials;
 
@@ -25,6 +28,7 @@ class SimulatorCUDA{
 public:
 	std::vector<Particle> particles;
 	Particle* d_particles;
+	int particleCount;
 	struct cudaGraphicsResource *cuda_vbo_resource;
 
 	float scale;
