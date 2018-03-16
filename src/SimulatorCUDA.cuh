@@ -8,15 +8,15 @@
 
 
 class SimulatorCUDA{
-	int gSizeX, gSizeY, gSizeY_3;
+	int gSize, gSizeX, gSizeY, gSizeY_3;
 	
 
 	Node* grid;
 	Node* d_grid;
-
+	int*d_counter;
 	std::vector<Node*> active;
-	//Node** d_active;
-	//int* d_nActive;
+	Node** d_active;
+	int* d_activeCount;
 
 	float* d_gridAtt;
 	float* d_particleAtt;
@@ -29,7 +29,7 @@ public:
 	std::vector<Particle> particles;
 	Particle* d_particles;
 	int particleCount;
-	struct cudaGraphicsResource *cuda_vbo_resource;
+	struct cudaGraphicsResource *cudaVboResource;
 
 	float scale;
 
