@@ -87,6 +87,7 @@ void SimulatorCUDA::initializeGrid(int sizeX, int sizeY) {
 	gSizeY_3			= sizeY - 3;
 	gSize			= gSizeX  *gSizeY;
 	const int sizeOfGrid	= gSize * sizeof(Node);
+
 	const int sizeOfActive	= gSize * sizeof(Node*);
 
 	grid = new Node[gSize];

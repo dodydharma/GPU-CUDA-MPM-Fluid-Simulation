@@ -11,7 +11,6 @@
 
 class SimulatorCUDA{
 	int gSize, gSizeX, gSizeY, gSizeY_3;
-	thrust::host_vector<Particle> host_vector;
 
 	Node* grid;
 	Node* d_grid;
