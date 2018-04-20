@@ -232,9 +232,6 @@
     <ClInclude Include="..\src\SimulatorCUDA.cuh" />
   </ItemGroup>
   <ItemGroup>
-    <CudaCompile Include="..\src\Material.cu" />
-    <CudaCompile Include="..\src\Node.cu" />
-    <CudaCompile Include="..\src\Particle.cu" />
     <CudaCompile Include="..\src\SimulatorCUDA.cu" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

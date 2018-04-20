@@ -41,7 +41,7 @@ void MPMFlui5App::setup()
 {	
 	s.initializeGrid(400, 200);
 	
-	s.addParticles(10240*3);
+	s.addParticles(10240*10);
 	
 	
 	s.scale = 3.0f;
@@ -49,7 +49,7 @@ void MPMFlui5App::setup()
 	console() << "jumlah partikel  " << n << endl;
 
 	mParticleVbo = gl::Vbo::create(GL_ARRAY_BUFFER, s.particles, GL_STREAM_DRAW);
-	cudaGraphicsGLRegisterBuffer(&(s.cuda_vbo_resource), mParticleVbo.get()->getId(), cudaGraphicsMapFlagsNone);
+	cudaGraphicsGLRegisterBuffer(&(s.cudaVboResource), mParticleVbo.get()->getId(), cudaGraphicsMapFlagsNone);
 	gpuErrchk(cudaPeekAtLastError());
 
 	// Describe particle semantics for GPU.

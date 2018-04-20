@@ -65,14 +65,5 @@
     <CudaCompile Include="..\src\SimulatorCUDA.cu">
       <Filter>Source Files</Filter>
     </CudaCompile>
-    <CudaCompile Include="..\src\Node.cu">
-      <Filter>Source Files</Filter>
-    </CudaCompile>
-    <CudaCompile Include="..\src\Particle.cu">
-      <Filter>Source Files</Filter>
-    </CudaCompile>
-    <CudaCompile Include="..\src\Material.cu">
-      <Filter>Source Files</Filter>
-    </CudaCompile>
   </ItemGroup>
 </Project>

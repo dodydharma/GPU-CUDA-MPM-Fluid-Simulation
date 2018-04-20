@@ -77,28 +77,24 @@ SimulatorCUDA::SimulatorCUDA() :scale(1.0f) {
 	cudaMalloc((void**)&d_materials, size);
 	cudaMemcpy(d_materials, materials, size, cudaMemcpyHostToDevice);
 	app::console() << "Materials intialized" << endl;
+
+	app::console() << "Particle size : " << sizeof(Particle) << endl;
+	app::console() << "Node size : " << sizeof(Node) << endl;
 }
 void SimulatorCUDA::initializeGrid(int sizeX, int sizeY) {
-	gSizeX = sizeX;
-	gSizeY = sizeY;
-	gSizeY_3 = sizeY - 3;
-	int gSize = gSizeX*gSizeY;
-	int sizeOfGrid		= gSize * sizeof(Node);
-	int sizeOfGridAtt	= gSize * sizeof(float) * numMaterials * 2;
+	gSizeX				= sizeX;
+	gSizeY				= sizeY;
+	gSizeY_3			= sizeY - 3;
+	gSize			= gSizeX  *gSizeY;
+	const int sizeOfGrid	= gSize * sizeof(Node);
+	const int sizeOfActive	= gSize * sizeof(Node*);
 
 	grid = new Node[gSize];
 	gpuErrchk(cudaMalloc((void**)&d_grid, sizeOfGrid));
-	gpuErrchk(cudaMalloc((void**)&d_gridAtt, sizeOfGridAtt));
-
-	for(int i = 0; i < gSize; i++)
-	{
-		grid[i].initAttArrays(d_gridAtt + i * numMaterials * 2);
-	}
 
 	gpuErrchk(cudaMemcpy(d_grid, grid, sizeOfGrid, cudaMemcpyHostToDevice));
-	//size = gSizeX*gSizeY * sizeof(Node*);
-	//gpuErrchk(cudaMalloc((void**)&d_active, size));
-	//gpuErrchk(cudaMalloc((void**)&d_nActive, sizeof(int)));
+	gpuErrchk(cudaMalloc((void**)&d_active, sizeOfActive));
+	gpuErrchk(cudaMalloc((void**)&d_activeCount, sizeof(int))); 
 }
 
 void SimulatorCUDA::addParticles(int n) {
@@ -112,11 +108,8 @@ void SimulatorCUDA::addParticles(int n) {
 	
 	this->particleCount = n;
 	const int sizeOfParticles		= particleCount * sizeof(Particle);
-	const int sizeOfParticlesAtt	= particleCount * sizeof(float) * 12;
 
 	gpuErrchk(cudaMalloc((void**)&d_particles, sizeOfParticles));
-	gpuErrchk(cudaMalloc((void**)&d_particleAtt, sizeOfParticlesAtt));
-	gpuErrchk(cudaMemset(d_particleAtt, 0.0f, sizeOfParticlesAtt));
 	
 	int i, j;
 	// Material 1
@@ -125,7 +118,6 @@ void SimulatorCUDA::addParticles(int n) {
 			float px = i*mx + offset;
 			float py = j*my + offset;
 			Particle p(&d_materials[0], px, py, ColorA(1, 0.5, 0.5, 1));
-			p.initAttArrays(d_particleAtt + particles.size()*12);
 			p.initializeWeights(gSizeY);
 			particles.push_back(p);
 		}
@@ -137,7 +129,6 @@ void SimulatorCUDA::addParticles(int n) {
 			float px = i*mx + (this->gSizeX-bw)/2;
 			float py = j*my + offset;
 			Particle p(&d_materials[1], px, py, ColorA(0.5, 1, 0.5, 1));
-			p.initAttArrays(d_particleAtt + particles.size() * 12);
 			p.initializeWeights(gSizeY);
 			particles.push_back(p);
 		}
@@ -149,7 +140,6 @@ void SimulatorCUDA::addParticles(int n) {
 			float px = i*mx + this->gSizeX - bw - offset;
 			float py = j*my + offset;
 			Particle p(&d_materials[2], px, py, ColorA(0.5, 0.5, 1, 1));
-			p.initAttArrays(d_particleAtt + particles.size() * 12);
 			p.initializeWeights(gSizeY);
 			particles.push_back(p);
 		}
@@ -159,7 +149,6 @@ void SimulatorCUDA::addParticles(int n) {
 		float px = i*mx + this->gSizeX - bw - offset;
 		float py = (j++)*my + offset;
 		Particle p(&d_materials[2], px, py, ColorA(0.5, 0.5, 1, 1));
-		p.initAttArrays(d_particleAtt + particles.size() * 12);
 		p.initializeWeights(gSizeY);
 		particles.push_back(p);
 	}
@@ -312,17 +301,17 @@ __global__ void loop1(Particle* particles, Node* grid, int nParticles, int gSize
 	}
 }
 
-__global__ void loop2(Node* grid, int  gSizeXY)
+__global__ void loop2(Node* grid, Node** active, int* activeCount, int  gSize, int* counter)
 {
 	Node* gi = grid;
 	//int gSizeXY = gSizeX * gSizeY;
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
-	if (i < gSizeXY) {
+	if (i < gSize) {
 		Node* n = &gi[i];
 		if (n->active && n->mass > 0) {
-			//atomicAdd(nActive, 1);
-			//active[*nActive] = n;
-			//n->active = false;
+			int j = atomicAdd(activeCount, 1);
+			active[j] = n;
+			n->active = false;
 			n->ax = n->ay = 0;
 			n->gx = 0;
 			n->gy = 0;
@@ -474,17 +463,17 @@ __global__ void loop3(Particle* particles, Node* grid, int nParticles, int gSize
 	}
 }
 
-__global__ void loop4(Node* grid, int gSizeXY)
+__global__ void loop4(Node** active, int* activeCount)
 {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
-	if(i<gSizeXY){
-		Node* n = &grid[i];
-		if (n->active && n->mass > 0) {
-			n->u2 = 0;
-			n->v2 = 0;
-			n->ax /= n->mass;
-			n->ay /= n->mass;
-		}
+	if(i<*activeCount){
+		Node* n = active[i];
+		//if (n->active && n->mass > 0) {
+		n->u2 = 0;
+		n->v2 = 0;
+		n->ax /= n->mass;
+		n->ay /= n->mass;
+		//}
 	}
 }
 
@@ -533,70 +522,73 @@ __global__ void loop5(Particle* particles, Node* grid, int particleCount, int gS
 	}
 }
 
-__global__ void loop6(Node* grid, int gSizeXY)
+__global__ void loop6(Node** active, int* activeCount)
 {
 	int i = blockDim.x * blockIdx.x + threadIdx.x;
-	if (i<gSizeXY) {
-		Node* n = &grid[i];
-		if (n->active && n->mass > 0) {
-			n->u2 /= n->mass;
-			n->v2 /= n->mass;
+	if (i<*activeCount) {
+		Node* n =active[i];
+		//if (n->active && n->mass > 0) {
+		n->u2 /= n->mass;
+		n->v2 /= n->mass;
 
-			n->mass = 0;
-			n->particleDensity = 0;
-			n->u = 0;
-			n->v = 0;
-			memset(n->cgx, 0, numMaterials * sizeof(float));
-			memset(n->cgy, 0, numMaterials * sizeof(float));
-			n->active = false;
-		}
+		n->mass = 0;
+		n->particleDensity = 0;
+		n->u = 0;
+		n->v = 0;
+		memset(n->cgx, 0, numMaterials * sizeof(float) * 2);
+		//n->active = false;
+		//}
 	}
 }
 
 void SimulatorCUDA::updateCUDA(){
+	int activeCount;
 	dim3 dimBlockP(1024, 1, 1);
 	dim3 dimGridP((particleCount+1023)/1024, 1, 1);
 	dim3 dimBlockN(gSizeX, 1, 1);
 	dim3 dimGridN(gSizeY, 1, 1);
-	int gSizeXY = gSizeX*gSizeY;
-
+	dim3 dimBlockA;
+	dim3 dimGridA;
 	Particle* mappedParticles;
 	size_t num_bytes;
 
-
-	loop1 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3);
-	gpuErrchk(cudaPeekAtLastError());
-	gpuErrchk(cudaDeviceSynchronize());
-	//cudaMemset(d_nActive, -1, sizeof(int));
-	loop2 << <dimGridN, dimBlockN >> >(d_grid, gSizeXY);
-	gpuErrchk(cudaPeekAtLastError());
-	gpuErrchk(cudaDeviceSynchronize());
-	loop3 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3, scale);
-	gpuErrchk(cudaPeekAtLastError());
-	gpuErrchk(cudaDeviceSynchronize());
-	int tes;
-	//cudaMemcpy(&tes, d_nActive, sizeof(int), cudaMemcpyDeviceToHost);
-	//app::console() << "ACTIVE NODES : " << tes << endl;
-	loop4 << <dimGridN, dimBlockN >> >(d_grid, gSizeXY);
+	loop1 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3); //Pass 1
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
 
-	cudaGraphicsMapResources(1, &cuda_vbo_resource, 0);
+	cudaMemset(d_activeCount, 0, sizeof(int));
+	loop2 << <dimGridN, dimBlockN >> >(d_grid, d_active, d_activeCount, gSize, d_counter); //Pass 2
 	gpuErrchk(cudaPeekAtLastError());
-	cudaGraphicsResourceGetMappedPointer((void **)&mappedParticles, &num_bytes, cuda_vbo_resource);
+	gpuErrchk(cudaDeviceSynchronize());
+
+	loop3 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3, scale); //Pass 3
+	gpuErrchk(cudaPeekAtLastError());
+	gpuErrchk(cudaDeviceSynchronize());
+	
+	cudaMemcpy(&activeCount, d_activeCount, sizeof(int), cudaMemcpyDeviceToHost);
+	//::console() << "ACTIVE NODES : " << activeCount << endl;
+	dimBlockA	= dim3( 128, 1, 1 );
+	dimGridA	= dim3((activeCount + 127) / 128, 1, 1 );
+
+	loop4 << <dimGridA, dimBlockA >> >(d_active, d_activeCount); //Pass 4
+	gpuErrchk(cudaPeekAtLastError());
+	gpuErrchk(cudaDeviceSynchronize());
+
+	cudaGraphicsMapResources(1, &cudaVboResource, 0);
+	gpuErrchk(cudaPeekAtLastError());
+	cudaGraphicsResourceGetMappedPointer((void **)&mappedParticles, &num_bytes, cudaVboResource);
 	gpuErrchk(cudaPeekAtLastError());
 
-	loop5 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeY_3, mappedParticles);
+	loop5 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeY_3, mappedParticles); //Pass 5
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize())
 
-	cudaGraphicsUnmapResources(1, &cuda_vbo_resource, 0);
+	cudaGraphicsUnmapResources(1, &cudaVboResource, 0);
 	gpuErrchk(cudaPeekAtLastError());
 
-	loop6 << <dimGridN, dimBlockN >> >(d_grid, gSizeXY);
+	loop6 << <dimGridA, dimBlockA >> >(d_active, d_activeCount); //Pass 6
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
-	//app::console() << particles[0].pos.x << ","<< particles[0].pos.y << endl;
 }
 
 void SimulatorCUDA::update() {
