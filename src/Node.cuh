@@ -39,20 +39,6 @@ struct Node {
 		}
 		return *this;
 	}
-
-	__host__ __device__ void initAttArrays(float* cgx) {
-
-		const int size = numMaterials * sizeof(float) * 2;
-		//this->cgx = cgx;
-		//this->cgy = cgx + numMaterials;
-#ifdef __CUDA_ARCH__
-		memset(cgx, 0, size);
-#else
-		gpuErrchk(cudaMemset(cgx, 0, size));
-#endif	
-	}
-
-
 };
 
 #endif

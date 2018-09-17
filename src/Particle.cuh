@@ -19,6 +19,8 @@ struct Particle {
 	float gx[3];
 	float gy[3];
 
+	Particle() : pos(0, 0, 0), color(.1, .5, 1, 1), x(0), y(0), u(0), v(0), T00(0), T01(0), T11(0), cx(0), cy(0), gi(0) {}
+
 	Particle(Material* mat) : pos(0, 0, 0), color(.1, .5, 1, 1), mat(mat), x(0), y(0), u(0), v(0), T00(0), T01(0), T11(0), cx(0), cy(0), gi(0) {}
 
 	Particle(Material* mat, float x, float y) : pos(x, y, 0), color(.1, .5, 1, 1), mat(mat), x(x), y(y), u(0), v(0), T00(0), T01(0), T11(0), cx(0), cy(0), gi(0) {}
@@ -30,6 +32,7 @@ struct Particle {
 	~Particle() {}
 
 	void initializeWeights(int gSizeY) {
+		
 		cx = (int)(x - .5f);
 		cy = (int)(y - .5f);
 		gi = cx * gSizeY + cy;

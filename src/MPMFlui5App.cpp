@@ -39,6 +39,8 @@ public:
 
 void MPMFlui5App::setup()
 {	
+	gl::enableVerticalSync(false);
+
 	s.initializeGrid(400, 200);
 	
 	s.addParticles(10240*10);
@@ -132,7 +134,7 @@ void MPMFlui5App::mouseDown( MouseEvent event )
 
 void MPMFlui5App::update()
 {
-	s.updateCUDA();
+	s.update();
 }
 
 void MPMFlui5App::draw()
@@ -141,8 +143,8 @@ void MPMFlui5App::draw()
 	// clear out the window with black
 	gl::clear(Color(0, 0, 0));
 	gl::setMatricesWindowPersp(getWindowSize());
-	gl::enableDepthRead();
-	gl::enableDepthWrite();
+	//gl::enableDepthRead();
+	//gl::enableDepthWrite();
 	mParticleBatch->draw();
 	gl::drawString(toString(static_cast<int>(getAverageFps())) + " fps", vec2(32.0f, 52.0f));
 	gl::drawString(toString(static_cast<int>(s.particles.size())) + " Partciles", vec2(32.0f, 75.0f));
