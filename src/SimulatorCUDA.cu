@@ -8,6 +8,7 @@
 #include <math.h>
 #include <cstdlib>
 #include <vector>
+#include <chrono>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -19,6 +20,8 @@
 #include <thrust/adjacent_difference.h>
 #include <thrust/binary_search.h>
 #include <thrust/iterator/counting_iterator.h>
+
+
 
 using namespace std;
 using namespace cinder;
@@ -76,6 +79,8 @@ SimulatorCUDA::SimulatorCUDA() :scale(1.0f) {
 
 	materials[3].materialIndex = 3;
 
+	step = 0;
+
 	const int size = numMaterials * sizeof(Material);
 	cudaMalloc((void**)&d_materials, size);
 	cudaMemcpy(d_materials, materials, size, cudaMemcpyHostToDevice);
@@ -93,7 +98,6 @@ void SimulatorCUDA::initializeGrid(int sizeX, int sizeY) {
 
 	const int sizeOfGrid	= gSize * sizeof(Node);
 	const int sizeOfActive = gSize * sizeof(Node*);
-	const int sizeOfHist = gSize * sizeof(int);
 
 	grid = new Node[gSize];
 	gpuErrchk(cudaMalloc((void**)&d_grid, sizeOfGrid));
@@ -102,8 +106,6 @@ void SimulatorCUDA::initializeGrid(int sizeX, int sizeY) {
 	gpuErrchk(cudaMalloc((void**)&d_active, sizeOfActive));
 	gpuErrchk(cudaMalloc((void**)&d_activeCount, sizeof(int))); 
 
-	gpuErrchk(cudaMalloc((void**)&d_particleGridHist, sizeOfHist));
-	particleGridHist = (int*)malloc(sizeOfHist);
 }
 
 void SimulatorCUDA::addParticles(int n) {
@@ -117,14 +119,8 @@ void SimulatorCUDA::addParticles(int n) {
 	
 	this->particleCount = n;
 	const int sizeOfParticles	= particleCount * sizeof(Particle);
-	const int sizeOfIdxs	= particleCount * sizeof(int) * 2;
 
 	gpuErrchk(cudaMalloc((void**)&d_particles, sizeOfParticles));
-	gpuErrchk(cudaMalloc((void**)&d_particleIdx, sizeOfIdxs));
-	gpuErrchk(cudaMalloc((void**)&d_particleGridIdx, sizeOfIdxs));
-
-	particleIdx = (int*)malloc(sizeOfIdxs);
-	particleGridIdx = (int*)malloc(sizeOfIdxs);
 
 	int i, j;
 	// Material 1
@@ -178,7 +174,20 @@ void SimulatorCUDA::addParticles(int n) {
 
 }
 
-__global__ void pass1(Particle* particles, Node* grid, int nParticles, int gSizeX, int gSizeY, int gSizeY_3, int* particleIdx, int* particleGridIdx)
+void SimulatorCUDA::initializeCUDA(int blockDim) {
+	this->blockDim = blockDim;
+
+	dimBlockP = dim3(blockDim, 1, 1);
+	dimGridP = dim3((particleCount + blockDim - 1) / blockDim, 1, 1);
+
+	dimBlockP2 = dim3(blockDim, 1, 1);
+	dimGridP2 = dim3(((particleCount * 9) + blockDim - 1) / blockDim, 1, 1);
+
+	dimBlockN = dim3(blockDim, 1, 1);
+	dimGridN = dim3(gSize + blockDim - 1 / blockDim, 1, 1);
+}
+
+__global__ void pass1(Particle* particles, Node* grid, int nParticles, int gSizeX, int gSizeY, int gSizeY_3)
 {
 	int pi = blockDim.x * blockIdx.x + threadIdx.x;
 	if (pi < nParticles) {
@@ -287,11 +296,6 @@ __global__ void pass1(Particle* particles, Node* grid, int nParticles, int gSize
 		y++;
 		ppy[2] = .5f * y * y - 1.5f * y + 1.125f;
 		pgy[2] = y - 1.5f;
-
-		particleIdx[pi] = pi;
-		particleGridIdx[pi] = p.gi;
-
-
 	}
 }
 
@@ -576,52 +580,12 @@ __global__ void pass6(Node** active, int* activeCount)
 
 void SimulatorCUDA::update(){
 	int activeCount;
-	const int BLOCK_DIM = 64;
-	dim3 dimBlockP(BLOCK_DIM, 1, 1);
-	dim3 dimGridP((particleCount+BLOCK_DIM-1)/BLOCK_DIM, 1, 1);
-	dim3 dimBlockP2(BLOCK_DIM, 1, 1);
-	dim3 dimGridP2(((particleCount*9) + BLOCK_DIM - 1) / BLOCK_DIM, 1, 1);
-	dim3 dimBlockN(BLOCK_DIM, 1, 1);
-	dim3 dimGridN(gSize+BLOCK_DIM-1/BLOCK_DIM, 1, 1);
-	dim3 dimBlockA;
-	dim3 dimGridA;
 	Particle* mappedParticles;
 	size_t num_bytes;
 
-
-
-	pass1 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3, d_particleIdx, d_particleGridIdx); //Pass 1
+	pass1 << <dimGridP, dimBlockP >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3); //Pass 1
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
-	/*
-	thrust::device_ptr<int> t_particleIdx(d_particleIdx);
-	thrust::device_ptr<int> t_particleGridIdx(d_particleGridIdx);
-	thrust::device_ptr<int> t_particleGridHist(d_particleGridHist);
-	//thrust::device_ptr<Particle> t_particles(d_particles);
-	//thrust::sort_by_key(t_particleGridIdx, t_particleGridIdx + particleCount, t_particles);
-	thrust::sort_by_key(t_particleGridIdx, t_particleGridIdx + particleCount, t_particleIdx);
-
-	thrust::counting_iterator<int> searchBegin(0);
-	thrust::upper_bound(t_particleGridHist, t_particleGridIdx + gSize,
-		searchBegin, searchBegin + gSize,
-		t_particleGridHist);
-	thrust::adjacent_difference(t_particleGridHist, t_particleGridHist + gSize,
-		t_particleGridHist);
-	
-
-	cudaMemcpy(particleIdx, d_particleIdx, particleCount * sizeof(int), cudaMemcpyDeviceToHost);
-	cudaMemcpy(particleGridIdx, d_particleGridIdx, particleCount * sizeof(int), cudaMemcpyDeviceToHost);
-	app::console() << "PARTICLE IDX" << endl;
-	for (int i = 0; i < particleCount; i++) {
-		app::console() << particleIdx[i] << "," ;
-	}
-	app::console() << endl;
-	app::console() << "GRID IDX" << endl;
-	for (int i = 0; i < particleCount; i++) {
-		app::console() << particleGridIdx[i] << ",";
-	}
-	app::console() << endl;
-	*/
 
 	pass1_1 << <dimGridP2, dimBlockP2 >> >(d_particles, d_grid, particleCount, gSizeX, gSizeY, gSizeY_3); //Pass 1
 	gpuErrchk(cudaPeekAtLastError());
@@ -638,8 +602,8 @@ void SimulatorCUDA::update(){
 	
 	cudaMemcpy(&activeCount, d_activeCount, sizeof(int), cudaMemcpyDeviceToHost);
 	//::console() << "ACTIVE NODES : " << activeCount << endl;
-	dimBlockA	= dim3( 256, 1, 1 );
-	dimGridA	= dim3((activeCount + 255) / 256, 1, 1 );
+	dimBlockA	= dim3( blockDim, 1, 1 );
+	dimGridA	= dim3((activeCount + blockDim - 1) / blockDim, 1, 1 );
 
 	pass4 << <dimGridA, dimBlockA >> >(d_active, d_activeCount); //Pass 4
 	gpuErrchk(cudaPeekAtLastError());
@@ -660,6 +624,12 @@ void SimulatorCUDA::update(){
 	pass6 << <dimGridA, dimBlockA >> >(d_active, d_activeCount); //Pass 6
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
+
+	if (maxStep != 0 && ++step >= maxStep) {
+		end = std::chrono::high_resolution_clock::now();
+		app::console() << "Duration : " << std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count() << endl;
+		exit(EXIT_SUCCESS);
+	}
 }
 
 

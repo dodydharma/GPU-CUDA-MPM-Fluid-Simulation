@@ -6,6 +6,7 @@
 #include "cinder/Utilities.h"
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
+#include <chrono>
 
 //#include "Simulator.h"
 #include "SimulatorCUDA.cuh"
@@ -16,8 +17,6 @@ using namespace ci;
 using namespace ci::app;
 using namespace std;
 
-
-//extern int* cuda_main(void);
 
 class MPMFlui5App : public App {
 	SimulatorCUDA s;
@@ -41,12 +40,24 @@ void MPMFlui5App::setup()
 {	
 	gl::enableVerticalSync(false);
 
-	s.initializeGrid(400, 200);
+	vector<string> args = getCommandLineArgs();
+	console() << "ARG " << args.size() << endl;
+	cout << "ARG " << args.size() << endl;
+	if (args.size() == 6) {
+		s.maxStep = stoi(args[1]);
+		s.initializeGrid(stoi(args[2]), stoi(args[3]));
+		s.addParticles(stoi(args[4]));
+		s.initializeCUDA(stoi(args[5]));
+		s.scale = (float)getWindowWidth()/(float)stoi(args[2]);
+	}
+	else {
+		s.maxStep = 1000000;
+		s.initializeGrid(400, 200);
+		s.addParticles(100000);
+		s.initializeCUDA(32);
+		s.scale = 3;
+	}
 	
-	s.addParticles(10240*10);
-	
-	
-	s.scale = 3.0f;
 	n = s.particles.size();
 	console() << "jumlah partikel  " << n << endl;
 
@@ -125,7 +136,9 @@ void MPMFlui5App::setup()
 
 	gl::Batch::AttributeMapping mapping({ { geom::Attrib::CUSTOM_9, "trailPosition" } });
 	mParticleBatch = gl::Batch::create(mesh, mGlsl, mapping);
-	gl::pointSize(1.0f); 
+	gl::pointSize(1.0f);
+
+	s.begin = std::chrono::high_resolution_clock::now();
 }
 
 void MPMFlui5App::mouseDown( MouseEvent event )
